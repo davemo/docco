@@ -60,19 +60,33 @@ parse = (source, code) ->
   language = get_language source
   has_code = docs_text = code_text = ''
 
+  # DM: entities not replaced yet
+  
   save = (docs, code) ->
     sections.push docs_text: docs, code_text: code
+    
+  replace_start_and_end_comments = (line) ->
+    temp = replace_start_comment line
+    replace_end_comment temp
+    
+  replace_start_comment = (line) ->
+    line.replace(language.comment_matcher, '')
+    
+  replace_end_comment = (line) ->
+    line.replace(language.end_comment_matcher, '')
 
   for line in lines
     if line.match(language.comment_matcher) and not line.match(language.comment_filter)
       if has_code
         save docs_text, code_text
         has_code = docs_text = code_text = ''
-      docs_text += line.replace(language.comment_matcher, '') + '\n'
+      templine = if language.end_comment_matcher then replace_start_and_end_comments line else replace_start_comment line
+      docs_text += templine + '\n'
     else
       has_code = yes
       code_text += line + '\n'
-  save docs_text, code_text
+    
+  save docs_text, code_text  
   sections
 
 # Highlights a single chunk of CoffeeScript code, using **Pygments** over stdio,
@@ -91,11 +105,22 @@ highlight = (source, sections, callback) ->
   pygments.stdout.addListener 'data', (result) ->
     output += result if result
   pygments.addListener 'exit', ->
+    #console.log "OUTPUT -----" 
+    #console.log output
     output = output.replace(highlight_start, '').replace(highlight_end, '')
+    #console.log "OUTPUT REPLACED -----"
+    #console.log output
     fragments = output.split language.divider_html
+    # fragments = output.split "&lt;--DIVIDER--&gt;" #FIXES
+    console.log "FRAGMENTS.length " + fragments.length 
+    # console.log sections.length + " sections"
     for section, i in sections
       section.code_html = highlight_start + fragments[i] + highlight_end
+      # console.log "SECTION ----------------------  " + i
+      # console.log section.code_html
+      # section.docs_html = showdown.makeHtml section.docs_text
       section.docs_html = showdown.makeHtml section.docs_text
+      # console.log section.docs_text
     callback()
   pygments.stdin.write((section.code_text for section in sections).join(language.divider_text))
   pygments.stdin.end()
@@ -131,27 +156,44 @@ languages =
     name: 'javascript', symbol: '//'
   '.rb':
     name: 'ruby', symbol: '#'
-  '.py':
-    name: 'python', symbol: '#'
+  '.html':
+    name: 'html', symbol: '<!--', end_symbol: '-->'
 
 # Build out the appropriate matchers and delimiters for each language.
 for ext, l of languages
 
+  console.log "language: " + l.name
+
   # Does the line begin with a comment?
   l.comment_matcher = new RegExp('^\\s*' + l.symbol + '\\s?')
+  console.log "l.comment_matcher: " + l.comment_matcher
+  
+  if l.end_symbol then l.end_comment_matcher = new RegExp(l.end_symbol + '\\s?')
+  if l.end_symbol then console.log "l.end_comment_matcher: " + l.end_comment_matcher
 
   # Ignore [hashbangs](http://en.wikipedia.org/wiki/Shebang_(Unix))
   # and interpolations...
   l.comment_filter = new RegExp('(^#![/]|^\\s*#\\{)')
+  console.log "l.comment_filter: " + l.comment_filter
 
   # The dividing token we feed into Pygments, to delimit the boundaries between
   # sections.
-  l.divider_text = '\n' + l.symbol + 'DIVIDER\n'
+  l.divider_text = 
+  if l.end_symbol
+  then '\n' + l.symbol + 'DIVIDER' + l.end_symbol + '\n'
+  else '\n' + l.symbol + 'DIVIDER\n'
+  
+  console.log "l.divider_text: " + l.divider_text
 
   # The mirror of `divider_text` that we expect Pygments to return. We can split
   # on this to recover the original sections.
   # Note: the class is "c" for Python and "c1" for the other languages
-  l.divider_html = new RegExp('\\n*<span class="c1?">' + l.symbol + 'DIVIDER<\\/span>\\n*')
+  l.divider_html = 
+  if l.end_symbol 
+  then new RegExp('\\n*<span class="c1?">' + l.symbol + 'DIVIDER' + l.end_symbol + '<\\/span>\\n*')
+  else new RegExp('\\n*<span class="c1?">' + l.symbol + 'DIVIDER<\\/span>\\n*')
+    
+  console.log "l.divider_html: " + l.divider_html
 
 # Get the current language we're documenting, based on the extension.
 get_language = (source) -> languages[path.extname(source)]
