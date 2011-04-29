@@ -59,8 +59,6 @@ parse = (source, code) ->
   sections = []
   language = get_language source
   has_code = docs_text = code_text = ''
-
-  # DM: entities not replaced yet
   
   save = (docs, code) ->
     sections.push docs_text: docs, code_text: code
@@ -100,27 +98,19 @@ highlight = (source, sections, callback) ->
   language = get_language source
   pygments = spawn 'pygmentize', ['-l', language.name, '-f', 'html', '-O', 'encoding=utf-8']
   output   = ''
+  html_comment = new RegExp('<span class="c">&[^\s]*</span>', 'g')
+  
   pygments.stderr.addListener 'data',  (error)  ->
     console.error error if error
   pygments.stdout.addListener 'data', (result) ->
     output += result if result
   pygments.addListener 'exit', ->
-    #console.log "OUTPUT -----" 
-    #console.log output
-    output = output.replace(highlight_start, '').replace(highlight_end, '')
-    #console.log "OUTPUT REPLACED -----"
-    #console.log output
-    fragments = output.split language.divider_html
-    # fragments = output.split "&lt;--DIVIDER--&gt;" #FIXES
-    console.log "FRAGMENTS.length " + fragments.length 
-    # console.log sections.length + " sections"
+    # There is an extra special case here at the end to replace html comment markup.
+    output = output.replace(highlight_start, '').replace(highlight_end, '').replace(html_comment, '<span class="c"><!--DIVIDER--></span>')
+    fragments = output.split language.divider_html 
     for section, i in sections
       section.code_html = highlight_start + fragments[i] + highlight_end
-      # console.log "SECTION ----------------------  " + i
-      # console.log section.code_html
-      # section.docs_html = showdown.makeHtml section.docs_text
       section.docs_html = showdown.makeHtml section.docs_text
-      # console.log section.docs_text
     callback()
   pygments.stdin.write((section.code_text for section in sections).join(language.divider_text))
   pygments.stdin.end()
@@ -162,28 +152,22 @@ languages =
 # Build out the appropriate matchers and delimiters for each language.
 for ext, l of languages
 
-  console.log "language: " + l.name
-
   # Does the line begin with a comment?
   l.comment_matcher = new RegExp('^\\s*' + l.symbol + '\\s?')
-  console.log "l.comment_matcher: " + l.comment_matcher
   
+  # Does the line end with a comment ending matcher?
   if l.end_symbol then l.end_comment_matcher = new RegExp(l.end_symbol + '\\s?')
-  if l.end_symbol then console.log "l.end_comment_matcher: " + l.end_comment_matcher
 
   # Ignore [hashbangs](http://en.wikipedia.org/wiki/Shebang_(Unix))
   # and interpolations...
   l.comment_filter = new RegExp('(^#![/]|^\\s*#\\{)')
-  console.log "l.comment_filter: " + l.comment_filter
 
   # The dividing token we feed into Pygments, to delimit the boundaries between
-  # sections.
+  # sections. Modified to take into account double sided comments.
   l.divider_text = 
   if l.end_symbol
   then '\n' + l.symbol + 'DIVIDER' + l.end_symbol + '\n'
   else '\n' + l.symbol + 'DIVIDER\n'
-  
-  console.log "l.divider_text: " + l.divider_text
 
   # The mirror of `divider_text` that we expect Pygments to return. We can split
   # on this to recover the original sections.
@@ -193,8 +177,6 @@ for ext, l of languages
   then new RegExp('\\n*<span class="c1?">' + l.symbol + 'DIVIDER' + l.end_symbol + '<\\/span>\\n*')
   else new RegExp('\\n*<span class="c1?">' + l.symbol + 'DIVIDER<\\/span>\\n*')
     
-  console.log "l.divider_html: " + l.divider_html
-
 # Get the current language we're documenting, based on the extension.
 get_language = (source) -> languages[path.extname(source)]
 
@@ -209,7 +191,7 @@ ensure_directory = (callback) ->
 
 # Micro-templating, originally by John Resig, borrowed by way of
 # [Underscore.js](http://documentcloud.github.com/underscore/).
-template = (str) ->
+template = (str) ->  
   new Function 'obj',
     'var p=[],print=function(){p.push.apply(p,arguments);};' +
     'with(obj){p.push(\'' +
